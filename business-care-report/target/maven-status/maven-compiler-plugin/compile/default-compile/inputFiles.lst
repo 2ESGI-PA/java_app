@@ -1,5 +1,6 @@
-C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\service\DataGeneratorService.java
+C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\gui\ChangePasswordController.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\model\Facture.java
+C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\service\PasswordService.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\model\Devis.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\model\enums\InvoiceStatus.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\model\Evenement.java
@@ -9,11 +10,13 @@ C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\co
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\util\ChartUtil.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\model\ClientAccount.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\model\Reservation.java
+C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\gui\PasswordController.java
+C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\config\DatabaseConfig.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\model\enums\ContractStatus.java
+C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\service\DatabaseService.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\service\StatisticsService.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\model\enums\SubscriptionTier.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\service\PdfReportService.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\model\Prestation.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\model\Abonnement.java
 C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\model\enums\QuoteStatus.java
-C:\Users\Charles\Documents\GitHub\java_app\business-care-report\src\main\java\com\businesscare\Main.java

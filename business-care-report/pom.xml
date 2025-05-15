@@ -18,9 +18,8 @@
 
   <dependencies>
     <dependency>
-        <groupId>com.github.javafaker</groupId>
-        <artifactId>javafaker</artifactId>
-        <version>1.0.2</version>
+        <groupId>mysql</groupId> <artifactId>mysql-connector-java</artifactId>
+        <version>8.0.28</version>
     </dependency>
     <dependency>
         <groupId>org.apache.pdfbox</groupId>
@@ -113,15 +112,36 @@
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-compiler-plugin</artifactId>
             <version>3.8.1</version>
-        </plugin>
+            </plugin>
         <plugin>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-maven-plugin</artifactId>
             <version>0.0.8</version>
             <configuration>
                 <mainClass>com.businesscare.gui.MainApp</mainClass>
-                <release>${maven.compiler.release}</release>
+                </configuration>
+        </plugin>
+          <plugin>
+            <artifactId>maven-assembly-plugin</artifactId>
+            <configuration>
+                <archive>
+                    <manifest>
+                        <mainClass>com.businesscare.gui.MainApp</mainClass>
+                    </manifest>
+                </archive>
+                <descriptorRefs>
+                    <descriptorRef>jar-with-dependencies</descriptorRef>
+                </descriptorRefs>
             </configuration>
+            <executions>
+                <execution>
+                    <id>make-assembly</id>
+                    <phase>package</phase>
+                    <goals>
+                        <goal>single</goal>
+                    </goals>
+                </execution>
+            </executions>
         </plugin>
     </plugins>
   </build>

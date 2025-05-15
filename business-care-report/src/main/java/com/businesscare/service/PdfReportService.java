@@ -2,6 +2,9 @@ package com.businesscare.service;
 
 import java.awt.Color;
 import java.io.IOException;
+import java.text.DecimalFormat;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -14,6 +17,8 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.businesscare.model.ClientAccount;
 import com.businesscare.model.Evenement;
@@ -21,361 +26,463 @@ import com.businesscare.model.Prestation;
 import com.businesscare.util.ChartUtil;
 
 public class PdfReportService {
+    private static final Logger logger = LoggerFactory.getLogger(PdfReportService.class);
 
     private final StatisticsService statisticsService;
+    private final DatabaseService databaseService;
     private float currentY;
     private PDPageContentStream contentStream;
     private PDDocument document;
+    private PDPage currentPage;
 
-    private static final float PAGE_PADDING = 50;
-    private static final float CHART_VERTICAL_SPACING = 35;
-    private static final float TEXT_BLOCK_HEIGHT_ESTIMATE = 100;
-    private static final int DEFAULT_CHART_HEIGHT = 440;
-    private static final int BAR_CHART_HEIGHT = 540;   
-    private static final int DEFAULT_CHART_WIDTH = (int) (PDRectangle.A4.getWidth() - (2 * PAGE_PADDING) - 20);
+    private static final float PAGE_MARGIN_TOP = 90;
+    private static final float PAGE_MARGIN_BOTTOM = 50;
+    private static final float PAGE_MARGIN_SIDES = 40;
+    private static final float CONTENT_START_Y_OFFSET = 100;
+    private static final float ELEMENT_VERTICAL_SPACING = 25;
+    private static final float ELEMENT_HORIZONTAL_SPACING = 20;
+    private static final float CHART_TITLE_HEIGHT = 25;
+    private static final float TEXT_BLOCK_LINE_HEIGHT = 14;
+    private static final int TEXT_BLOCK_FONT_SIZE = 9;
+    private static final PDType1Font FONT_HELVETICA = PDType1Font.HELVETICA;
+    private static final PDType1Font FONT_HELVETICA_BOLD = PDType1Font.HELVETICA_BOLD;
+    private static final float USABLE_PAGE_WIDTH = PDRectangle.A4.getWidth() - (2 * PAGE_MARGIN_SIDES);
+    private static final float ELEMENT_WIDTH_HALF = (USABLE_PAGE_WIDTH - ELEMENT_HORIZONTAL_SPACING) / 2;
+    private static final int DEFAULT_CHART_HEIGHT_HALF_PAGE = 200;
+    private static final int BAR_CHART_HEIGHT_HALF_PAGE = 280;
+    private static final int LINE_CHART_HEIGHT_FULL_PAGE = 300;
 
-    private static final Color HEADER_BG_COLOR = new Color(41, 128, 185);
-    private static final Color HEADER_TEXT_COLOR = Color.WHITE;
-    private static final Color SECTION_TITLE_COLOR = new Color(52, 73, 94);
-    private static final Color DIVIDER_COLOR = new Color(189, 195, 199);
-    private static final Color CHART_TITLE_BG = new Color(236, 240, 241);
 
-    public PdfReportService(StatisticsService statisticsService) {
+    private static final Color COLOR_PRIMARY_HEADER_BG = new Color(41, 128, 185);
+    private static final Color COLOR_PRIMARY_HEADER_TEXT = Color.WHITE;
+    private static final Color COLOR_SECTION_TITLE_TEXT = new Color(52, 73, 94);
+    private static final Color COLOR_ELEMENT_TITLE_BG = new Color(236, 240, 241);
+    private static final Color COLOR_DIVIDER_LINE = new Color(189, 195, 199);
+    private static final Color COLOR_FOOTER_TEXT = Color.DARK_GRAY;
+    private static final Color COLOR_BODY_TEXT = Color.BLACK;
+
+    private int elementsOnCurrentRow = 0;
+    private float lastElementHeightOnRow = 0;
+
+    private static final DecimalFormat euroFormatPdf = new DecimalFormat("#,##0.00 €");
+    private static final DecimalFormat kEuroFormatPdf = new DecimalFormat("#,##0 k€");
+    private static final DecimalFormat mEuroFormatPdf = new DecimalFormat("#,##0.00 M€");
+
+    public PdfReportService(StatisticsService statisticsService, DatabaseService databaseService) {
         this.statisticsService = statisticsService;
+        this.databaseService = databaseService; 
+        statisticsService_setDb(this.databaseService); 
+    }
+
+    private String formatCurrency(double value) {
+        if (value >= 1_000_000) {
+            return mEuroFormatPdf.format(value / 1_000_000.0);
+        } else if (value >= 1_000) {
+            return kEuroFormatPdf.format(value / 1_000.0);
+        } else {
+            return euroFormatPdf.format(value);
+        }
     }
 
     public void generateReport(List<ClientAccount> clients, List<Evenement> evenements, List<Prestation> prestations, String filePath) throws IOException {
         this.document = new PDDocument();
-        addCoverPage("Rapport Statistique BusinessCare");
-        generateClientsSection(clients);
-        generateEventsSection(evenements);
-        generatePrestationsSection(prestations);
+        this.statisticsService_setDb(this.databaseService);
+
+        addCoverPage("Rapport d'Activité Stratégique", "BusinessCare");
+
+        generateClientStatisticsPage();
+        generateEventStatisticsPage(evenements);
+        generatePrestationStatisticsPage(prestations);
+
+
         if (this.contentStream != null) {
             this.contentStream.close();
         }
         this.document.save(filePath);
         this.document.close();
+        logger.info("Rapport PDF généré avec succès : {}", filePath);
+    }
+    
+    private void statisticsService_setDb(DatabaseService dbService){
+        if(this.statisticsService != null && dbService != null){
+            this.statisticsService.setDatabaseService(dbService); 
+        } else {
+            if (this.statisticsService == null) {
+                logger.error("StatisticsService est null dans PdfReportService.statisticsService_setDb");
+            }
+            if (dbService == null) {
+                 logger.error("DatabaseService (dbService) est null dans PdfReportService.statisticsService_setDb");
+            }
+        }
     }
 
-    private void addCoverPage(String title) throws IOException {
-         PDPage coverPage = new PDPage(PDRectangle.A4);
+
+    private void addCoverPage(String title, String subtitle) throws IOException {
+        PDPage coverPage = new PDPage(PDRectangle.A4);
         this.document.addPage(coverPage);
         try (PDPageContentStream cs = new PDPageContentStream(this.document, coverPage)) {
-            cs.setNonStrokingColor(HEADER_BG_COLOR);
-            cs.addRect(0, PDRectangle.A4.getHeight() - 150, PDRectangle.A4.getWidth(), 150);
+            cs.setNonStrokingColor(COLOR_PRIMARY_HEADER_BG);
+            cs.addRect(0, PDRectangle.A4.getHeight() - 180, PDRectangle.A4.getWidth(), 180);
             cs.fill();
 
             cs.beginText();
-            cs.setNonStrokingColor(HEADER_TEXT_COLOR);
-            cs.setFont(PDType1Font.HELVETICA_BOLD, 28);
-            cs.newLineAtOffset(PAGE_PADDING, PDRectangle.A4.getHeight() - 90);
+            cs.setNonStrokingColor(COLOR_PRIMARY_HEADER_TEXT);
+            cs.setFont(FONT_HELVETICA_BOLD, 32);
+            float titleWidth = FONT_HELVETICA_BOLD.getStringWidth(title) / 1000 * 32;
+            cs.newLineAtOffset((PDRectangle.A4.getWidth() - titleWidth) / 2, PDRectangle.A4.getHeight() - 100);
             cs.showText(title);
             cs.endText();
 
+            if (subtitle != null && !subtitle.isEmpty()) {
+                cs.beginText();
+                cs.setFont(FONT_HELVETICA, 18);
+                float subtitleWidth = FONT_HELVETICA.getStringWidth(subtitle) / 1000 * 18;
+                cs.newLineAtOffset((PDRectangle.A4.getWidth() - subtitleWidth) / 2, PDRectangle.A4.getHeight() - 130);
+                cs.showText(subtitle);
+                cs.endText();
+            }
+
+            String dateGen = "Généré le " + LocalDate.now().format(DateTimeFormatter.ofPattern("dd MMMM uuuu"));
             cs.beginText();
-            cs.setNonStrokingColor(HEADER_TEXT_COLOR);
-            cs.setFont(PDType1Font.HELVETICA, 14);
-            cs.newLineAtOffset(PAGE_PADDING, PDRectangle.A4.getHeight() - 120);
-            cs.showText("Généré le " + java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+            cs.setNonStrokingColor(COLOR_SECTION_TITLE_TEXT);
+            cs.setFont(FONT_HELVETICA, 12);
+            float dateWidth = FONT_HELVETICA.getStringWidth(dateGen) / 1000 * 12;
+            cs.newLineAtOffset((PDRectangle.A4.getWidth() - dateWidth) / 2, PDRectangle.A4.getHeight() / 2);
+            cs.showText(dateGen);
             cs.endText();
 
+            String footerText = "© " + LocalDate.now().getYear() + " BusinessCare - Document confidentiel";
             cs.beginText();
-            cs.setNonStrokingColor(Color.DARK_GRAY);
-            cs.setFont(PDType1Font.HELVETICA, 10);
-            cs.newLineAtOffset(PAGE_PADDING, 40);
-            cs.showText("© BusinessCare - Document confidentiel");
+            cs.setNonStrokingColor(COLOR_FOOTER_TEXT);
+            cs.setFont(FONT_HELVETICA, 9);
+            float footerWidth = FONT_HELVETICA.getStringWidth(footerText) / 1000 * 9;
+            cs.newLineAtOffset((PDRectangle.A4.getWidth() - footerWidth) / 2, PAGE_MARGIN_BOTTOM - 20);
+            cs.showText(footerText);
             cs.endText();
         }
         this.contentStream = null;
     }
 
-    private void prepareNewPage(String title) throws IOException {
+
+    private void prepareNewPage(String sectionTitle) throws IOException {
         if (this.contentStream != null) {
             this.contentStream.close();
         }
-        PDPage page = new PDPage(PDRectangle.A4);
-        this.document.addPage(page);
-        this.contentStream = new PDPageContentStream(this.document, page);
+        currentPage = new PDPage(PDRectangle.A4);
+        this.document.addPage(currentPage);
+        this.contentStream = new PDPageContentStream(this.document, currentPage);
 
-        contentStream.setNonStrokingColor(HEADER_BG_COLOR);
-        contentStream.addRect(0, PDRectangle.A4.getHeight() - 80, PDRectangle.A4.getWidth(), 80);
-        contentStream.fill();
-
-        addHeader(title);
-        addFooter(page.getMediaBox().getWidth() / 2, 30, this.document.getNumberOfPages() - 1);
-
-        contentStream.setStrokingColor(DIVIDER_COLOR);
-        contentStream.setLineWidth(1.5f);
-        contentStream.moveTo(PAGE_PADDING, PDRectangle.A4.getHeight() - 90);
-        contentStream.lineTo(PDRectangle.A4.getWidth() - PAGE_PADDING, PDRectangle.A4.getHeight() - 90);
-        contentStream.stroke();
-
-        this.currentY = PDRectangle.A4.getHeight() - PAGE_PADDING - 60;
-    }
-
-    private void addHeader(String title) throws IOException {
-        this.contentStream.beginText();
-        this.contentStream.setNonStrokingColor(HEADER_TEXT_COLOR);
-        this.contentStream.setFont(PDType1Font.HELVETICA_BOLD, 20);
-        this.contentStream.newLineAtOffset(PAGE_PADDING, PDRectangle.A4.getHeight() - 55);
-        this.contentStream.showText(title);
-        this.contentStream.endText();
-    }
-
-    private void addFooter(float xCenter, float y, int pageNumber) throws IOException {
-        this.contentStream.beginText();
-        this.contentStream.setNonStrokingColor(Color.DARK_GRAY);
-        this.contentStream.setFont(PDType1Font.HELVETICA, 10);
-        String pageText = "Page " + pageNumber;
-        float textWidth = PDType1Font.HELVETICA.getStringWidth(pageText) / 1000 * 10;
-        this.contentStream.newLineAtOffset(xCenter - (textWidth / 2), y);
-        this.contentStream.showText(pageText);
-        this.contentStream.endText();
-    }
-
-    private void addText(List<String> lines, float x, float y, PDType1Font font, int fontSize, int leading) throws IOException {
-        this.contentStream.beginText();
-        this.contentStream.setNonStrokingColor(Color.BLACK);
-        this.contentStream.setFont(font, fontSize);
-        this.contentStream.setLeading(leading);
-        this.contentStream.newLineAtOffset(x, y - fontSize);
-        for (String line : lines) {
-            this.contentStream.showText(line);
-            this.contentStream.newLine();
-        }
-        this.contentStream.endText();
-    }
-
-    private boolean hasEnoughSpace(float elementHeight) {
-        return (this.currentY - (elementHeight + 25) - CHART_VERTICAL_SPACING) > PAGE_PADDING;
-    }
-
-    private void drawChartTitle(String title, float yPosition) throws IOException {
-        contentStream.setNonStrokingColor(CHART_TITLE_BG);
-        contentStream.addRect(PAGE_PADDING, yPosition - 25, DEFAULT_CHART_WIDTH, 25);
+        contentStream.setNonStrokingColor(COLOR_PRIMARY_HEADER_BG);
+        contentStream.addRect(0, PDRectangle.A4.getHeight() - PAGE_MARGIN_TOP + 20, PDRectangle.A4.getWidth(), PAGE_MARGIN_TOP -20 );
         contentStream.fill();
 
         contentStream.beginText();
-        contentStream.setNonStrokingColor(SECTION_TITLE_COLOR);
-        contentStream.setFont(PDType1Font.HELVETICA_BOLD, 12);
-        contentStream.newLineAtOffset(PAGE_PADDING + 10, yPosition - 17);
-        contentStream.showText(title);
+        contentStream.setNonStrokingColor(COLOR_PRIMARY_HEADER_TEXT);
+        contentStream.setFont(FONT_HELVETICA_BOLD, 18);
+        contentStream.newLineAtOffset(PAGE_MARGIN_SIDES, PDRectangle.A4.getHeight() - (PAGE_MARGIN_TOP / 2) - 5 );
+        contentStream.showText(sectionTitle + " (Page " + (this.document.getNumberOfPages() -1 ) + ")");
+        contentStream.endText();
+
+        contentStream.setStrokingColor(COLOR_DIVIDER_LINE);
+        contentStream.setLineWidth(1f);
+        contentStream.moveTo(PAGE_MARGIN_SIDES, PDRectangle.A4.getHeight() - PAGE_MARGIN_TOP);
+        contentStream.lineTo(PDRectangle.A4.getWidth() - PAGE_MARGIN_SIDES, PDRectangle.A4.getHeight() - PAGE_MARGIN_TOP);
+        contentStream.stroke();
+
+        this.currentY = PDRectangle.A4.getHeight() - CONTENT_START_Y_OFFSET;
+        addPageFooter();
+
+        elementsOnCurrentRow = 0;
+        lastElementHeightOnRow = 0;
+    }
+
+    private void addPageFooter() throws IOException {
+        contentStream.beginText();
+        contentStream.setNonStrokingColor(COLOR_FOOTER_TEXT);
+        contentStream.setFont(FONT_HELVETICA, 9);
+        String pageText = "Page " + (this.document.getNumberOfPages() - 1) ;
+        float textWidth = FONT_HELVETICA.getStringWidth(pageText) / 1000 * 9;
+        contentStream.newLineAtOffset((currentPage.getMediaBox().getWidth() - textWidth) / 2, PAGE_MARGIN_BOTTOM - 20);
+        contentStream.showText(pageText);
         contentStream.endText();
     }
 
-    private void drawChart(byte[] chartBytes, String title, float yPosition, int chartHeight) throws IOException {
-        if (chartBytes == null || chartBytes.length == 0) {
-             System.err.println("Avertissement: Tentative de dessin d'un graphique vide: " + title);
-             this.currentY = yPosition - CHART_VERTICAL_SPACING;
-             return;
+    private float getCurrentX() {
+        if (elementsOnCurrentRow % 2 == 0) {
+            return PAGE_MARGIN_SIDES;
+        } else {
+            return PAGE_MARGIN_SIDES + ELEMENT_WIDTH_HALF + ELEMENT_HORIZONTAL_SPACING;
         }
-
-        float titleHeight = 25;
-        float totalElementHeight = chartHeight + titleHeight;
-        float chartContentY = yPosition - titleHeight;
-
-        drawChartTitle(title, yPosition);
-
-        contentStream.setStrokingColor(DIVIDER_COLOR);
-        contentStream.setLineWidth(1.0f);
-        contentStream.addRect(PAGE_PADDING, yPosition - totalElementHeight, DEFAULT_CHART_WIDTH, totalElementHeight);
-        contentStream.stroke();
-
-        PDImageXObject chartImage = PDImageXObject.createFromByteArray(this.document, chartBytes, title);
-        float imageMargin = 5;
-        float imageY = chartContentY - imageMargin - (chartHeight - (2*imageMargin));
-        float imageX = PAGE_PADDING + imageMargin;
-        float imageWidth = DEFAULT_CHART_WIDTH - (2*imageMargin);
-        float imageHeight = chartHeight - (2*imageMargin);
-
-        this.contentStream.drawImage(chartImage, imageX, imageY, imageWidth, imageHeight);
-
-        this.currentY = yPosition - totalElementHeight - CHART_VERTICAL_SPACING;
     }
 
-    private void drawTextBlock(List<String> textLines, String title, float yPosition, int fontSize, int leading) throws IOException {
-        float titleHeight = 25;
-        float textContentHeight = (textLines.size() * leading);
-        float textPadding = 10;
-        float totalElementHeight = textContentHeight + titleHeight + textPadding;
-
-        drawChartTitle(title, yPosition);
-
-        contentStream.setStrokingColor(DIVIDER_COLOR);
-        contentStream.setLineWidth(1.0f); 
-        contentStream.addRect(PAGE_PADDING, yPosition - totalElementHeight, DEFAULT_CHART_WIDTH, totalElementHeight);
-        contentStream.stroke();
-
-        addText(textLines, PAGE_PADDING + 10, yPosition - titleHeight - (textPadding / 2), PDType1Font.HELVETICA, fontSize, leading);
-        this.currentY = yPosition - totalElementHeight - CHART_VERTICAL_SPACING;
+    private boolean hasEnoughSpace(float elementHeight, String sectionTitle) throws IOException {
+        float requiredSpace = elementHeight + CHART_TITLE_HEIGHT;
+         if (elementsOnCurrentRow % 2 == 0) {
+            if (currentY - requiredSpace < PAGE_MARGIN_BOTTOM + 30) {
+                prepareNewPage(sectionTitle);
+                return true;
+            }
+        } else {
+            if (currentY - Math.max(lastElementHeightOnRow, requiredSpace) < PAGE_MARGIN_BOTTOM + 30) {
+                 prepareNewPage(sectionTitle);
+                 return true;
+            }
+        }
+        return true;
     }
 
-    private void generateClientsSection(List<ClientAccount> clients) throws IOException {
-        prepareNewPage("Statistiques des Comptes Clients (1)");
-        int pageNum = 1;
-        String baseTitle = "Statistiques des Comptes Clients";
+    private void advancePosition(float elementHeight) {
+        if (elementsOnCurrentRow % 2 == 0) {
+            lastElementHeightOnRow = elementHeight + CHART_TITLE_HEIGHT;
+        } else {
+            currentY -= Math.max(lastElementHeightOnRow, elementHeight + CHART_TITLE_HEIGHT) + ELEMENT_VERTICAL_SPACING;
+            lastElementHeightOnRow = 0;
+        }
+        elementsOnCurrentRow++;
+    }
 
-        Map<String, Long> repartitionType = statisticsService.getClientRepartitionParType(clients);
-        if (!repartitionType.isEmpty()) {
-            String chartTitle = "Répartition par Type de Client";
-            if (!hasEnoughSpace(DEFAULT_CHART_HEIGHT)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-            byte[] chartBytes = ChartUtil.createPieChartImage(chartTitle,
-                repartitionType.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> (Number)e.getValue())),
-                DEFAULT_CHART_WIDTH, DEFAULT_CHART_HEIGHT);
-            drawChart(chartBytes, chartTitle, this.currentY, DEFAULT_CHART_HEIGHT);
+    private void drawChartOrTextBlock(String title, byte[] chartBytes, List<String> textLines, String sectionTitle, boolean useFullWidth, float chartHeightOverride) throws IOException {
+        float elementWidth = useFullWidth ? USABLE_PAGE_WIDTH : ELEMENT_WIDTH_HALF;
+        int defaultChartHeight = useFullWidth ? DEFAULT_CHART_HEIGHT_HALF_PAGE * 2 : DEFAULT_CHART_HEIGHT_HALF_PAGE;
+        
+        if (title.toLowerCase().contains("par ca") || title.toLowerCase().contains("secteur d'activité") || title.toLowerCase().contains("par capacité") || title.toLowerCase().contains("par coût")) {
+             defaultChartHeight = useFullWidth ? BAR_CHART_HEIGHT_HALF_PAGE * 2 : BAR_CHART_HEIGHT_HALF_PAGE;
+        }
+        if (title.toLowerCase().contains("par mois")) {
+            defaultChartHeight = LINE_CHART_HEIGHT_FULL_PAGE;
         }
 
-        Map<String, Double> repartitionCA = statisticsService.getClientRepartitionParCA(clients);
-        Map<String, List<Number>> barChartCAMap = repartitionCA.entrySet().stream()
-            .collect(Collectors.toMap(
-                e -> "CA",
-                e -> new ArrayList<>(Collections.singletonList(e.getValue())),
-                (oldList, newList) -> { oldList.addAll(newList); return oldList; },
-                java.util.LinkedHashMap::new
-            ));
-        List<String> caCategories = new ArrayList<>(repartitionCA.keySet());
-        if (!caCategories.isEmpty() && barChartCAMap.containsKey("CA") && !barChartCAMap.get("CA").isEmpty()) {
-            String chartTitle = "Répartition par CA (Top 5)";
-            if (!hasEnoughSpace(BAR_CHART_HEIGHT)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-            byte[] chartBytes = ChartUtil.createBarChartImage(chartTitle,
-                "Clients", "Chiffre d'Affaires (€)",
-                barChartCAMap, caCategories, DEFAULT_CHART_WIDTH, BAR_CHART_HEIGHT);
-            drawChart(chartBytes, chartTitle, this.currentY, BAR_CHART_HEIGHT);
+
+        float actualElementHeight = chartBytes != null ? (chartHeightOverride > 0 ? chartHeightOverride : defaultChartHeight) : (textLines.size() * TEXT_BLOCK_LINE_HEIGHT) + 20;
+
+        if (!hasEnoughSpace(actualElementHeight, sectionTitle)) {
         }
 
-        Map<String, Long> repartitionVille = statisticsService.getClientRepartitionParVille(clients);
-        if (!repartitionVille.isEmpty()) {
-            String chartTitle = "Répartition Géographique (Ville)";
-            if (!hasEnoughSpace(DEFAULT_CHART_HEIGHT)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-            byte[] chartBytes = ChartUtil.createPieChartImage(chartTitle,
-                repartitionVille.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> (Number)e.getValue())),
-                DEFAULT_CHART_WIDTH, DEFAULT_CHART_HEIGHT);
-            drawChart(chartBytes, chartTitle, this.currentY, DEFAULT_CHART_HEIGHT);
+        float currentX = useFullWidth ? PAGE_MARGIN_SIDES : getCurrentX();
+        float yPos = currentY;
+
+        contentStream.setNonStrokingColor(COLOR_ELEMENT_TITLE_BG);
+        contentStream.addRect(currentX, yPos - CHART_TITLE_HEIGHT, elementWidth, CHART_TITLE_HEIGHT);
+        contentStream.fill();
+
+        contentStream.beginText();
+        contentStream.setNonStrokingColor(COLOR_SECTION_TITLE_TEXT);
+        contentStream.setFont(FONT_HELVETICA_BOLD, 11);
+        contentStream.newLineAtOffset(currentX + 5, yPos - (CHART_TITLE_HEIGHT / 2) - 4);
+        contentStream.showText(title);
+        contentStream.endText();
+
+        contentStream.setStrokingColor(COLOR_DIVIDER_LINE);
+        contentStream.setLineWidth(0.5f);
+        contentStream.addRect(currentX, yPos - CHART_TITLE_HEIGHT - actualElementHeight, elementWidth, CHART_TITLE_HEIGHT + actualElementHeight);
+        contentStream.stroke();
+
+        if (chartBytes != null) {
+            if (chartBytes.length == 0) {
+                logger.warn("Tentative de dessin d'un graphique vide (0 bytes) pour : {}", title);
+                List<String> errorText = List.of("(Données non disponibles", " pour ce graphique)");
+                drawTextInsideBox(errorText, currentX, yPos - CHART_TITLE_HEIGHT, elementWidth, actualElementHeight);
+            } else {
+                try {
+                    PDImageXObject chartImage = PDImageXObject.createFromByteArray(this.document, chartBytes, title);
+                    float imgMargin = 5;
+                    contentStream.drawImage(chartImage, currentX + imgMargin, yPos - CHART_TITLE_HEIGHT - actualElementHeight + imgMargin, elementWidth - (2*imgMargin), actualElementHeight - (2*imgMargin));
+                } catch (IOException e) {
+                    logger.error("Impossible de créer PDImageXObject pour le graphique : {}. Bytes length: {}", title, chartBytes.length, e);
+                     List<String> errorText = List.of("(Erreur chargement image", " pour ce graphique)");
+                     drawTextInsideBox(errorText, currentX, yPos - CHART_TITLE_HEIGHT, elementWidth, actualElementHeight);
+                }
+            }
+        } else if (textLines != null) {
+            drawTextInsideBox(textLines, currentX, yPos - CHART_TITLE_HEIGHT, elementWidth, actualElementHeight);
         }
 
-        List<ClientAccount> top5Fideles = statisticsService.getTop5ClientsFideles(clients);
+        if (useFullWidth) {
+            currentY -= (actualElementHeight + CHART_TITLE_HEIGHT + ELEMENT_VERTICAL_SPACING);
+            elementsOnCurrentRow = 0;
+            lastElementHeightOnRow = 0;
+        } else {
+            advancePosition(actualElementHeight);
+        }
+    }
+
+    private void drawTextInsideBox(List<String> lines, float boxX, float boxY, float boxWidth, float boxHeight) throws IOException {
+        contentStream.beginText();
+        contentStream.setNonStrokingColor(COLOR_BODY_TEXT);
+        contentStream.setFont(FONT_HELVETICA, TEXT_BLOCK_FONT_SIZE);
+        contentStream.setLeading(TEXT_BLOCK_LINE_HEIGHT);
+
+        float textStartY = boxY - TEXT_BLOCK_LINE_HEIGHT + (TEXT_BLOCK_LINE_HEIGHT - TEXT_BLOCK_FONT_SIZE)/2 ;
+        float textMargin = 10;
+        contentStream.newLineAtOffset(boxX + textMargin, textStartY);
+
+        for (String line : lines) {
+            String remainingLine = line;
+
+            while (!remainingLine.isEmpty()) {
+                int breakPoint = findBreakPoint(remainingLine, boxWidth - (2 * textMargin), FONT_HELVETICA, TEXT_BLOCK_FONT_SIZE);
+                String lineToShow = remainingLine.substring(0, breakPoint);
+                remainingLine = remainingLine.substring(breakPoint).trim();
+
+                if (textStartY < boxY - boxHeight + TEXT_BLOCK_LINE_HEIGHT) {
+                    if (!remainingLine.isEmpty() || lines.indexOf(line) < lines.size() -1 ) {
+                        contentStream.showText("...");
+                    }
+                    contentStream.endText();
+                    return;
+                }
+
+                contentStream.showText(lineToShow);
+                if (!remainingLine.isEmpty()) {
+                    contentStream.newLineAtOffset(0, -TEXT_BLOCK_LINE_HEIGHT);
+                    textStartY -= TEXT_BLOCK_LINE_HEIGHT;
+                }
+            }
+            if (lines.indexOf(line) < lines.size() -1 && textStartY >= boxY - boxHeight + TEXT_BLOCK_LINE_HEIGHT *2) {
+                 contentStream.newLineAtOffset(0, -TEXT_BLOCK_LINE_HEIGHT);
+                 textStartY -= TEXT_BLOCK_LINE_HEIGHT;
+            } else if (lines.indexOf(line) == lines.size() -1) {
+            } else {
+                break;
+            }
+        }
+        contentStream.endText();
+    }
+
+    private int findBreakPoint(String text, float maxWidth, PDType1Font font, int fontSize) throws IOException {
+        float currentWidth = 0;
+        int lastSpace = -1;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            currentWidth += font.getStringWidth(String.valueOf(c)) / 1000 * fontSize;
+            if (Character.isWhitespace(c)) {
+                lastSpace = i;
+            }
+            if (currentWidth > maxWidth) {
+                return (lastSpace != -1 && lastSpace > 0) ? lastSpace : i;
+            }
+        }
+        return text.length();
+    }
+
+    private void generateClientStatisticsPage() throws IOException {
+        String sectionTitle = "Statistiques des Comptes Clients";
+        prepareNewPage(sectionTitle);
+        int chartWidth = (int) ELEMENT_WIDTH_HALF;
+        int chartHeight = DEFAULT_CHART_HEIGHT_HALF_PAGE;
+        int barChartHeight = BAR_CHART_HEIGHT_HALF_PAGE;
+
+        Map<String, Long> repartitionAbonnement = statisticsService.getClientCountBySubscriptionTier();
+        List<String> abonnementCategories = new ArrayList<>(repartitionAbonnement.keySet());
+        List<Number> abonnementValues = new ArrayList<>(repartitionAbonnement.values());
+        Map<String, List<Number>> abonnementMap = Collections.singletonMap("Clients", abonnementValues);
+        drawChartOrTextBlock("Répartition par Formule d'Abonnement", ChartUtil.createBarChartImage("Répartition par Formule d'Abonnement", "Formule", "Nombre de Clients", abonnementMap, abonnementCategories, chartWidth, barChartHeight, true), null, sectionTitle, false, 0);
+        
+        double[] caTranches = {5000, 15000, 50000};
+        Map<String, Double> repartitionCA = statisticsService.getClientRevenueDistribution(caTranches);
+        Map<String, Number> repartitionCAPie = repartitionCA.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e-> (Number)e.getValue()));
+        drawChartOrTextBlock("Répartition du CA Actif par Client (Tranches)", ChartUtil.createPieChartImage("Répartition du CA Actif par Client (Tranches)", repartitionCAPie, chartWidth, chartHeight), null, sectionTitle, false, 0);
+
+        Map<String, Long> repartitionTaille = statisticsService.getClientCountBySize();
+        Map<String, Number> repartitionTaillePie = repartitionTaille.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e-> (Number)e.getValue()));
+        drawChartOrTextBlock("Répartition par Taille d'Entreprise", ChartUtil.createPieChartImage("Répartition par Taille d'Entreprise", repartitionTaillePie, chartWidth, chartHeight), null, sectionTitle, false, 0);
+
+        Map<String, Long> repartitionSecteur = statisticsService.getClientCountByIndustry(5);
+        List<String> secteurCategories = new ArrayList<>(repartitionSecteur.keySet());
+        List<Number> secteurValues = new ArrayList<>(repartitionSecteur.values());
+        Map<String, List<Number>> secteurMap = Collections.singletonMap("Clients", secteurValues);
+        drawChartOrTextBlock("Répartition par Secteur d'Activité (Top 5)", ChartUtil.createBarChartImage("Répartition par Secteur d'Activité (Top 5)", "Secteur", "Nombre de Clients", secteurMap, secteurCategories, chartWidth, barChartHeight, false), null, sectionTitle, false, 0);
+        
+        Map<String, Double> top5Clients = statisticsService.getTop5ClientsByTotalPaid();
         List<String> topClientsText = new ArrayList<>();
-        String blockTitle = "Top 5 Clients Fidèles";
-        List<String> clientDetails = top5Fideles.stream()
-            .map(c -> "• " + c.getNomSociete() + " (Abo: " + c.getAbonnements().size() + ", CA: " + String.format("%,.0f €", c.getChiffreAffairesAnnuel()) + ")")
-            .collect(Collectors.toList());
-        if (clientDetails.isEmpty()) {
+        topClientsText.add("Basé sur le Montant Total Facturé et Payé:");
+        if (top5Clients.isEmpty()) {
             topClientsText.add("(Aucune donnée disponible)");
         } else {
-            topClientsText.addAll(clientDetails);
+            top5Clients.forEach((name, amount) -> topClientsText.add(String.format("• %s - %s", name, formatCurrency(amount))));
         }
-        if (!hasEnoughSpace(TEXT_BLOCK_HEIGHT_ESTIMATE)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-        drawTextBlock(topClientsText, blockTitle, this.currentY, 9, 14);
-   }
-
-    // event section 
-    private void generateEventsSection(List<Evenement> evenements) throws IOException {
-        prepareNewPage("Statistiques des Évènements (1)");
-        int pageNum = 1;
-        String baseTitle = "Statistiques des Évènements";
-
-        Map<String, Long> repartitionType = statisticsService.getEvenementRepartitionParType(evenements);
-        if (!repartitionType.isEmpty()) {
-             String chartTitle = "Répartition par Type d'Évènement";
-            if (!hasEnoughSpace(DEFAULT_CHART_HEIGHT)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-            byte[] chartBytes = ChartUtil.createPieChartImage(chartTitle,
-                repartitionType.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> (Number)e.getValue())),
-                DEFAULT_CHART_WIDTH, DEFAULT_CHART_HEIGHT);
-            drawChart(chartBytes, chartTitle, this.currentY, DEFAULT_CHART_HEIGHT);
+        if (elementsOnCurrentRow % 2 != 0) { 
+            currentY -= Math.max(lastElementHeightOnRow, 0) + ELEMENT_VERTICAL_SPACING;
+            elementsOnCurrentRow = 0; lastElementHeightOnRow = 0;
         }
+        drawChartOrTextBlock("Top 5 Clients les Plus Fidèles", null, topClientsText, sectionTitle, true, 0);
+    }
 
-        Map<String, Integer> frequentation = statisticsService.getFrequentationEvenements(evenements);
-        if(!frequentation.isEmpty()){
-            String chartTitle = "Participants par Évènement (Top 5)";
-             List<String> eventCategories = new ArrayList<>(frequentation.keySet());
-             List<String> truncatedEventCategories = eventCategories.stream()
-                .map(s -> s.length() > 35 ? s.substring(0, 34) + "..." : s)
-                .collect(Collectors.toList());
+    private void generateEventStatisticsPage(List<Evenement> evenements) throws IOException {
+        String sectionTitle = "Statistiques des Événements";
+        prepareNewPage(sectionTitle);
+        int chartWidth = (int) ELEMENT_WIDTH_HALF;
+        int chartHeight = DEFAULT_CHART_HEIGHT_HALF_PAGE;
+        int barChartHeight = BAR_CHART_HEIGHT_HALF_PAGE;
 
-            if (!hasEnoughSpace(BAR_CHART_HEIGHT)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-            byte[] chartBytes = ChartUtil.createBarChartImage(chartTitle,
-                "Évènements", "Nbr. Participants",
-                Map.of("Participants", new ArrayList<>(frequentation.values())),
-                truncatedEventCategories,
-                DEFAULT_CHART_WIDTH, BAR_CHART_HEIGHT);
-            drawChart(chartBytes, chartTitle, this.currentY, BAR_CHART_HEIGHT);
+        Map<String, Long> repartitionType = statisticsService.getEventCountByType(evenements);
+        Map<String, Number> repartitionTypePie = repartitionType.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e-> (Number)e.getValue()));
+        drawChartOrTextBlock("Répartition par Type/Catégorie", ChartUtil.createPieChartImage("Répartition par Type/Catégorie", repartitionTypePie, chartWidth, chartHeight), null, sectionTitle, false, 0);
+
+        Map<String, Long> freqMois = statisticsService.getEventCountByMonth();
+        Map<String, Map<String, Number>> freqMoisLine = Collections.singletonMap("Événements", freqMois.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> (Number)e.getValue())));
+        if (elementsOnCurrentRow % 2 != 0) {
+            currentY -= Math.max(lastElementHeightOnRow, 0) + ELEMENT_VERTICAL_SPACING;
+            elementsOnCurrentRow = 0; lastElementHeightOnRow = 0;
         }
+        drawChartOrTextBlock("Fréquence par Mois", ChartUtil.createLineChartImage("Fréquence par Mois", "Mois", "Nombre d'Événements", freqMoisLine, (int)USABLE_PAGE_WIDTH, LINE_CHART_HEIGHT_FULL_PAGE), null, sectionTitle, true, LINE_CHART_HEIGHT_FULL_PAGE);
 
-        Map<String, Long> repartitionLieu = statisticsService.getEvenementRepartitionParLieu(evenements);
-        if (!repartitionLieu.isEmpty()) {
-            String chartTitle = "Répartition par Lieu";
-            if (!hasEnoughSpace(DEFAULT_CHART_HEIGHT)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-            byte[] chartBytes = ChartUtil.createPieChartImage(chartTitle,
-                repartitionLieu.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> (Number)e.getValue())),
-                DEFAULT_CHART_WIDTH, DEFAULT_CHART_HEIGHT);
-            drawChart(chartBytes, chartTitle, this.currentY, DEFAULT_CHART_HEIGHT);
-        }
+        double[] capaciteTranches = {50, 100, 200};
+        Map<String, Long> repartitionCapacite = statisticsService.getEventDistributionByCapacity(capaciteTranches);
+        List<String> capaciteCategories = new ArrayList<>(repartitionCapacite.keySet());
+        List<Number> capaciteValues = new ArrayList<>(repartitionCapacite.values());
+        Map<String, List<Number>> capaciteMap = Collections.singletonMap("Événements", capaciteValues);
+        drawChartOrTextBlock("Répartition par Capacité d'Accueil", ChartUtil.createBarChartImage("Répartition par Capacité d'Accueil", "Capacité", "Nombre d'Événements", capaciteMap, capaciteCategories, chartWidth, barChartHeight, false), null, sectionTitle, false, 0);
 
-        List<Evenement> top5Demandes = statisticsService.getTop5EvenementsDemandes(evenements);
+        Map<String, Long> statutEvenements = statisticsService.getEventStatusCounts();
+        Map<String, Number> statutEvenementsPie = statutEvenements.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e-> (Number)e.getValue()));
+        drawChartOrTextBlock("Statut des Événements (Actifs/Inactifs)", ChartUtil.createPieChartImage("Statut des Événements", statutEvenementsPie, chartWidth, chartHeight), null, sectionTitle, false, 0);
+        
+        Map<String, Integer> top5Events = statisticsService.getTop5EventsByBooking();
         List<String> topEventsText = new ArrayList<>();
-        String blockTitle = "Top 5 Évènements Demandés";
-        List<String> eventDetails = top5Demandes.stream()
-            .map(e -> "• " + e.getNomEvenement() + " (Rés: " + e.getReservations().size() + ")")
-            .collect(Collectors.toList());
-        if (eventDetails.isEmpty()) {
+        topEventsText.add("Basé sur le Nombre de Réservations:");
+         if (top5Events.isEmpty()) {
             topEventsText.add("(Aucune donnée disponible)");
         } else {
-            topEventsText.addAll(eventDetails);
+            top5Events.forEach((name, count) -> topEventsText.add(String.format("• %s - %d réservations", name, count)));
         }
-        if (!hasEnoughSpace(TEXT_BLOCK_HEIGHT_ESTIMATE)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-        drawTextBlock(topEventsText, blockTitle, this.currentY, 9, 14);
-   }
-
-    // prestation
-    private void generatePrestationsSection(List<Prestation> prestations) throws IOException {
-        prepareNewPage("Statistiques des Prestations (1)");
-        int pageNum = 1;
-        String baseTitle = "Statistiques des Prestations";
-
-        Map<String, Long> repartitionType = statisticsService.getPrestationRepartitionParType(prestations);
-        if (!repartitionType.isEmpty()) {
-             String chartTitle = "Répartition par Type de Prestation";
-            if (!hasEnoughSpace(DEFAULT_CHART_HEIGHT)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-            byte[] chartBytes = ChartUtil.createPieChartImage(chartTitle,
-                repartitionType.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> (Number)e.getValue())),
-                DEFAULT_CHART_WIDTH, DEFAULT_CHART_HEIGHT);
-            drawChart(chartBytes, chartTitle, this.currentY, DEFAULT_CHART_HEIGHT);
+        if (elementsOnCurrentRow % 2 != 0) {
+            currentY -= Math.max(lastElementHeightOnRow, 0) + ELEMENT_VERTICAL_SPACING;
+            elementsOnCurrentRow = 0; lastElementHeightOnRow = 0;
         }
+        drawChartOrTextBlock("Top 5 Événements les Plus Demandés", null, topEventsText, sectionTitle, true, 0);
+    }
 
-        Map<String, Double> repartitionCout = statisticsService.getPrestationRepartitionParCout(prestations);
-        if(!repartitionCout.isEmpty()){
-            String chartTitle = "Coût Total par Type (Top 5)";
-            if (!hasEnoughSpace(BAR_CHART_HEIGHT)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-            byte[] chartBytes = ChartUtil.createBarChartImage(chartTitle,
-                "Type Prestation", "Coût Total (€)",
-                Map.of("Coût", new ArrayList<>(repartitionCout.values())),
-                new ArrayList<>(repartitionCout.keySet()),
-                DEFAULT_CHART_WIDTH, BAR_CHART_HEIGHT);
-            drawChart(chartBytes, chartTitle, this.currentY, BAR_CHART_HEIGHT);
-        }
+    private void generatePrestationStatisticsPage(List<Prestation> prestations) throws IOException {
+        String sectionTitle = "Statistiques des Prestations";
+        prepareNewPage(sectionTitle);
+        int chartWidth = (int) ELEMENT_WIDTH_HALF;
+        int chartHeight = DEFAULT_CHART_HEIGHT_HALF_PAGE;
+        int barChartHeight = BAR_CHART_HEIGHT_HALF_PAGE;
 
-        Map<String, Long> dispo = statisticsService.getPrestationDisponibilite(prestations);
-        if (!dispo.isEmpty()) {
-             String chartTitle = "Disponibilité des Prestations";
-            if (!hasEnoughSpace(DEFAULT_CHART_HEIGHT)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-            byte[] chartBytes = ChartUtil.createPieChartImage(chartTitle,
-                dispo.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> (Number)e.getValue())),
-                DEFAULT_CHART_WIDTH, DEFAULT_CHART_HEIGHT);
-            drawChart(chartBytes, chartTitle, this.currentY, DEFAULT_CHART_HEIGHT);
-        }
+        Map<String, Long> repartitionType = statisticsService.getServiceCountByType();
+        Map<String, Number> repartitionTypePie = repartitionType.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e-> (Number)e.getValue()));
+        drawChartOrTextBlock("Répartition par Type (Médical/Non-Médical)", ChartUtil.createPieChartImage("Répartition par Type", repartitionTypePie, chartWidth, chartHeight), null, sectionTitle, false, 0);
 
-        List<Prestation> top5Frequentes = statisticsService.getTop5PrestationsFrequentes(prestations);
+        double[] coutTranches = {50, 100, 250};
+        Map<String, Long> distributionCout = statisticsService.getServiceDistributionByCost(coutTranches);
+        List<String> coutCategories = new ArrayList<>(distributionCout.keySet());
+        List<Number> coutValues = new ArrayList<>(distributionCout.values());
+        Map<String, List<Number>> coutMap = Collections.singletonMap("Prestations", coutValues);
+        drawChartOrTextBlock("Distribution par Coût", ChartUtil.createBarChartImage("Distribution par Coût", "Tranche de Prix", "Nombre de Prestations", coutMap, coutCategories, chartWidth, barChartHeight, false), null, sectionTitle, false, 0);
+
+        List<Prestation> top5Prestations = statisticsService.getTop5PrestationsFrequentes(prestations);
         List<String> topPrestationsText = new ArrayList<>();
-        String blockTitle = "Top 5 Prestations Fréquentes";
-        List<String> prestationDetails = top5Frequentes.stream()
-            .map(p -> "• " + p.getNomPrestation() + " (Util: " + p.getIdEvenementsAssocies().size() + ")")
-            .collect(Collectors.toList());
-        if (prestationDetails.isEmpty()) {
-            topPrestationsText.add("(Aucune donnée disponible)");
+        topPrestationsText.add("Basé sur les associations aux événements (si implémenté):");
+        if (top5Prestations.isEmpty()) {
+            topPrestationsText.add("(Aucune donnée ou liaison événement non implémentée)");
         } else {
-            topPrestationsText.addAll(prestationDetails);
+            top5Prestations.forEach(p -> topPrestationsText.add(String.format("• %s (Évé. Associés: %d)", p.getNomPrestation(), p.getIdEvenementsAssocies().size())));
         }
-        if (!hasEnoughSpace(TEXT_BLOCK_HEIGHT_ESTIMATE)) { pageNum++; prepareNewPage(baseTitle + " (" + pageNum + ")"); }
-        drawTextBlock(topPrestationsText, blockTitle, this.currentY, 9, 14);
+         if (elementsOnCurrentRow % 2 != 0) {
+            currentY -= Math.max(lastElementHeightOnRow, 0) + ELEMENT_VERTICAL_SPACING;
+            elementsOnCurrentRow = 0; lastElementHeightOnRow = 0;
+        }
+        drawChartOrTextBlock("Top 5 Prestations (Critère Actuel)", null, topPrestationsText, sectionTitle, true, 0);
     }
 }

@@ -1,36 +1,46 @@
 package com.businesscare.gui;
 
-import javafx.collections.FXCollections;
-import javafx.concurrent.Task;
-import javafx.application.Platform;
-import javafx.fxml.FXML;
-import javafx.scene.control.Button;
-import javafx.scene.control.Hyperlink;
-import javafx.scene.control.TextArea;
-import javafx.scene.control.ProgressIndicator;
-import javafx.scene.control.Alert;
-import javafx.scene.control.Alert.AlertType;
-import javafx.scene.control.cell.PropertyValueFactory;
-import javafx.scene.control.TabPane;
-import javafx.scene.control.TableView;
-import javafx.scene.control.TableColumn;
-import javafx.beans.property.SimpleStringProperty;
-
 import java.awt.Desktop;
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.List;
-import java.util.Date;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
+import java.util.Collections;
+import java.util.Date;
+import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.businesscare.config.DatabaseConfig;
 import com.businesscare.model.ClientAccount;
 import com.businesscare.model.Evenement;
 import com.businesscare.model.Prestation;
-import com.businesscare.service.DataGeneratorService;
+import com.businesscare.service.DatabaseService;
 import com.businesscare.service.PdfReportService;
 import com.businesscare.service.StatisticsService;
 
+import javafx.application.Platform;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.collections.FXCollections;
+import javafx.concurrent.Task;
+import javafx.fxml.FXML;
+import javafx.fxml.FXMLLoader;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Button;
+import javafx.scene.control.Hyperlink;
+import javafx.scene.control.ProgressIndicator;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
+import javafx.scene.control.TextArea;
+import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
 
 class ReportData {
     final List<ClientAccount> clients;
@@ -46,42 +56,62 @@ class ReportData {
     }
 }
 
-
 public class ReportController {
+
+    private static final Logger logger = LoggerFactory.getLogger(ReportController.class);
 
     @FXML private Button generateButton;
     @FXML private TextArea statusTextArea;
     @FXML private ProgressIndicator progressIndicator;
     @FXML private Hyperlink openPdfLink;
-    @FXML private TabPane tabPane;
+
     @FXML private TableView<ClientAccount> clientsTable;
     @FXML private TableColumn<ClientAccount, String> clientNameCol;
     @FXML private TableColumn<ClientAccount, String> clientTypeCol;
     @FXML private TableColumn<ClientAccount, String> clientCityCol;
-    @FXML private TableColumn<ClientAccount, Double> clientCaCol;
+    @FXML private TableColumn<ClientAccount, String> clientCaCol;
+
     @FXML private TableView<Evenement> eventsTable;
     @FXML private TableColumn<Evenement, String> eventNameCol;
     @FXML private TableColumn<Evenement, String> eventTypeCol;
     @FXML private TableColumn<Evenement, String> eventLocationCol;
     @FXML private TableColumn<Evenement, String> eventStartDateCol;
+
     @FXML private TableView<Prestation> servicesTable;
     @FXML private TableColumn<Prestation, String> serviceNameCol;
     @FXML private TableColumn<Prestation, String> serviceTypeCol;
     @FXML private TableColumn<Prestation, Double> serviceCostCol;
-    @FXML private TableColumn<Prestation, Boolean> serviceAvailabilityCol;
+    @FXML private TableColumn<Prestation, String> serviceAvailabilityCol;
 
-    private final DataGeneratorService dataGenerator;
     private final StatisticsService statisticsService;
-    private final PdfReportService pdfReportService;
+    private PdfReportService pdfReportService; 
 
     private File generatedPdfFile = null;
-    private static final String REPORT_FILENAME = "Rapport_Activite_Business_Care.pdf";
-    private SimpleDateFormat dateFormat = new SimpleDateFormat("dd/MM/yyyy");
+    private static final String REPORT_FILENAME_PREFIX = "Rapport_Activite_Business_Care_";
+    private final SimpleDateFormat dateFormat = new SimpleDateFormat("dd/MM/yyyy");
+    private final SimpleDateFormat timestampFormat = new SimpleDateFormat("yyyyMMdd_HHmmss");
+
+    private static final DecimalFormat euroFormat = new DecimalFormat("#,##0.00 €");
+    private static final DecimalFormat kEuroFormat = new DecimalFormat("#,##0 k€");
+    private static final DecimalFormat mEuroFormat = new DecimalFormat("#,##0.00 M€");
+
 
     public ReportController() {
-        dataGenerator = new DataGeneratorService();
         statisticsService = new StatisticsService();
-        pdfReportService = new PdfReportService(statisticsService);
+    }
+
+    private String formatCurrency(Double value) {
+        if (value == null) {
+            return "N/A";
+        }
+        double val = value.doubleValue();
+        if (val >= 1_000_000) {
+            return mEuroFormat.format(val / 1_000_000.0);
+        } else if (val >= 1_000) {
+            return kEuroFormat.format(val / 1_000.0);
+        } else {
+            return euroFormat.format(val);
+        }
     }
 
     @FXML
@@ -93,7 +123,10 @@ public class ReportController {
         clientNameCol.setCellValueFactory(new PropertyValueFactory<>("nomSociete"));
         clientTypeCol.setCellValueFactory(new PropertyValueFactory<>("typeClient"));
         clientCityCol.setCellValueFactory(new PropertyValueFactory<>("ville"));
-        clientCaCol.setCellValueFactory(new PropertyValueFactory<>("chiffreAffairesAnnuel"));
+        clientCaCol.setCellValueFactory(cellData -> {
+            Double ca = cellData.getValue().getChiffreAffairesAnnuel();
+            return new SimpleStringProperty(formatCurrency(ca));
+        });
 
         eventNameCol.setCellValueFactory(new PropertyValueFactory<>("nomEvenement"));
         eventTypeCol.setCellValueFactory(new PropertyValueFactory<>("typeEvenement"));
@@ -106,14 +139,18 @@ public class ReportController {
         serviceNameCol.setCellValueFactory(new PropertyValueFactory<>("nomPrestation"));
         serviceTypeCol.setCellValueFactory(new PropertyValueFactory<>("typePrestation"));
         serviceCostCol.setCellValueFactory(new PropertyValueFactory<>("coutUnitaire"));
-        serviceAvailabilityCol.setCellValueFactory(new PropertyValueFactory<>("disponibilite"));
+        serviceAvailabilityCol.setCellValueFactory(cellData -> {
+            boolean disponible = cellData.getValue().isDisponibilite();
+            String displayText = disponible ? "✓ Oui" : "✗ Non";
+            return new SimpleStringProperty(displayText);
+        });
     }
 
     @FXML
     private void handleGenerateReport() {
         generateButton.setDisable(true);
         statusTextArea.clear();
-        statusTextArea.appendText("Lancement de la génération...\n");
+        statusTextArea.appendText("Lancement de la génération du rapport...\n");
         progressIndicator.setVisible(true);
         openPdfLink.setVisible(false);
         generatedPdfFile = null;
@@ -122,26 +159,70 @@ public class ReportController {
         eventsTable.getItems().clear();
         servicesTable.getItems().clear();
 
-        Task<ReportData> reportTask = new Task<ReportData>() {
+        Task<ReportData> reportTask = new Task<>() {
             @Override
             protected ReportData call() throws Exception {
-                updateMessage("Génération des données aléatoires...");
-                List<ClientAccount> clientAccounts = dataGenerator.generateClientAccounts(35);
-                List<Evenement> evenements = dataGenerator.generateEvenements(40, clientAccounts);
-                List<Prestation> prestations = dataGenerator.generatePrestations(30, evenements);
-                updateMessage(String.format("%d clients, %d événements, %d prestations générés.",
-                                            clientAccounts.size(), evenements.size(), prestations.size()));
+                Connection conn = null;
+                DatabaseService databaseService; 
+                try {
+                    updateMessage("Connexion à la base de données...");
+                    conn = DatabaseConfig.getConnection();
+                    databaseService = new DatabaseService(conn); 
 
-                updateMessage("Génération du rapport PDF...");
-                pdfReportService.generateReport(clientAccounts, evenements, prestations, REPORT_FILENAME);
+                    statisticsService.setDatabaseService(databaseService);
+                    pdfReportService = new PdfReportService(statisticsService, databaseService);
 
-                File pdfFile = new File(REPORT_FILENAME);
-                return new ReportData(clientAccounts, evenements, prestations, pdfFile);
+
+                    updateMessage("Récupération des données des clients...");
+                    List<ClientAccount> clientAccounts = databaseService.getAllClientAccounts();
+                    updateMessage(String.format("%d comptes clients récupérés.", clientAccounts.size()));
+
+                    updateMessage("Récupération des données des événements...");
+                    List<Evenement> evenements = databaseService.getAllEvenements();
+                    updateMessage(String.format("%d événements récupérés.", evenements.size()));
+
+                    updateMessage("Récupération des données des prestations...");
+                    List<Prestation> prestations = databaseService.getAllPrestations();
+                    updateMessage(String.format("%d prestations récupérées.", prestations.size()));
+
+                    if (clientAccounts.size() < 30 || evenements.size() < 30 || prestations.size() < 30) {
+                        String warningMsg = String.format(
+                            "Attention: Moins de 30 enregistrements pour certaines données (Clients: %d, Evénements: %d, Prestations: %d). Le rapport pourrait être moins représentatif.",
+                            clientAccounts.size(), evenements.size(), prestations.size()
+                        );
+                        updateMessage(warningMsg);
+                        logger.warn(warningMsg);
+                    }
+
+                    updateMessage("Génération du rapport PDF...");
+                    String reportFileNameWithTimestamp = REPORT_FILENAME_PREFIX + timestampFormat.format(new Date()) + ".pdf";
+                    
+                    if (pdfReportService == null) {
+                        logger.error("PdfReportService n'a pas été initialisé !");
+                        throw new IllegalStateException("PdfReportService n'a pas été initialisé.");
+                    }
+                    pdfReportService.generateReport(clientAccounts, evenements, prestations, reportFileNameWithTimestamp);
+
+                    File pdfFile = new File(reportFileNameWithTimestamp);
+                    return new ReportData(clientAccounts, evenements, prestations, pdfFile);
+
+                } finally {
+                    if (conn != null) {
+                        try {
+                            conn.close();
+                            updateMessage("Connexion à la base de données fermée.");
+                        } catch (SQLException ex) {
+                            logger.error("Erreur lors de la fermeture de la connexion JDBC.", ex);
+                        }
+                    }
+                }
             }
         };
 
         reportTask.messageProperty().addListener((obs, oldMsg, newMsg) -> {
-             Platform.runLater(() -> statusTextArea.appendText(newMsg + "\n"));
+            if (newMsg != null) {
+                Platform.runLater(() -> statusTextArea.appendText(newMsg + "\n"));
+            }
         });
 
         reportTask.setOnSucceeded(e -> {
@@ -153,25 +234,31 @@ public class ReportController {
                  eventsTable.setItems(FXCollections.observableArrayList(result.events));
                  servicesTable.setItems(FXCollections.observableArrayList(result.services));
 
-                 statusTextArea.appendText("Données affichées.\nRapport PDF généré avec succès : " + generatedPdfFile.getName() + "\n");
+                 statusTextArea.appendText("Données affichées dans les tableaux.\n");
+                 if (generatedPdfFile != null && generatedPdfFile.exists()){
+                    statusTextArea.appendText("Rapport PDF généré avec succès : " + generatedPdfFile.getAbsolutePath() + "\n");
+                    openPdfLink.setVisible(true);
+                 } else {
+                    statusTextArea.appendText("Erreur : Le fichier PDF n'a pas été généré ou est introuvable.\n");
+                    openPdfLink.setVisible(false);
+                 }
                  generateButton.setDisable(false);
                  progressIndicator.setVisible(false);
-                 openPdfLink.setVisible(true);
             });
         });
 
         reportTask.setOnFailed(e -> {
              Throwable ex = reportTask.getException();
+             logger.error("ERREUR majeure lors de la génération du rapport : {}", ex.getMessage(), ex);
              Platform.runLater(() -> {
-                 statusTextArea.appendText("ERREUR lors de la génération : " + ex.getMessage() + "\n");
+                 statusTextArea.appendText("ERREUR : " + ex.getMessage() + "\nConsultez les logs pour plus de détails.\n");
                  generateButton.setDisable(false);
                  progressIndicator.setVisible(false);
                  openPdfLink.setVisible(false);
                  showAlert(AlertType.ERROR, "Erreur de Génération",
-                           "Une erreur est survenue lors de la création du rapport.\n" +
+                           "Une erreur critique est survenue lors de la génération du rapport.\n" +
                            ex.getClass().getSimpleName() + ": " + ex.getMessage());
              });
-             ex.printStackTrace();
         });
 
         new Thread(reportTask).start();
@@ -183,28 +270,62 @@ public class ReportController {
             try {
                 if (Desktop.isDesktopSupported()) {
                     Desktop.getDesktop().open(generatedPdfFile);
-                    statusTextArea.appendText("Ouverture du fichier PDF...\n");
+                    statusTextArea.appendText("Ouverture du fichier PDF : " + generatedPdfFile.getName() + "\n");
                 } else {
-                    statusTextArea.appendText("L'ouverture automatique de fichiers n'est pas supportée sur ce système.\n");
-                    showAlert(AlertType.WARNING, "Ouverture non supportée", "Impossible d'ouvrir le fichier automatiquement.");
+                    String msg = "L'ouverture automatique de fichiers n'est pas supportée sur ce système.";
+                    statusTextArea.appendText(msg + "\n");
+                    showAlert(AlertType.WARNING, "Ouverture non supportée", msg + "\nLe fichier se trouve ici : " + generatedPdfFile.getAbsolutePath());
                 }
             } catch (IOException | UnsupportedOperationException e) {
-                statusTextArea.appendText("Erreur lors de l'ouverture du PDF : " + e.getMessage() + "\n");
-                 showAlert(AlertType.ERROR, "Erreur d'Ouverture", "Impossible d'ouvrir le fichier PDF:\n" + e.getMessage());
+                 logger.error("Erreur lors de l'ouverture du PDF : {}", e.getMessage(), e);
+                 statusTextArea.appendText("Erreur lors de l'ouverture du PDF : " + e.getMessage() + "\n");
+                 showAlert(AlertType.ERROR, "Erreur d'Ouverture", "Impossible d'ouvrir le fichier PDF :\n" + e.getMessage() + "\nLe fichier se trouve ici : " + generatedPdfFile.getAbsolutePath());
             }
         } else {
-             statusTextArea.appendText("Le fichier PDF n'a pas été trouvé ou n'a pas encore été généré.\n");
-             showAlert(AlertType.WARNING, "Fichier non trouvé", "Générez d'abord le rapport.");
+             statusTextArea.appendText("Fichier PDF non trouvé ou non généré. Veuillez d'abord générer le rapport.\n");
+             showAlert(AlertType.WARNING, "Fichier non trouvé", "Le rapport PDF n'a pas encore été généré ou est introuvable.");
+        }
+    }
+
+    @FXML
+    private void handleShowChangePasswordDialog() {
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("ChangePasswordDialog.fxml"));
+            Parent root = loader.load();
+
+            Stage dialogStage = new Stage();
+            dialogStage.setTitle("Modifier le mot de passe");
+            dialogStage.initModality(Modality.WINDOW_MODAL);
+            
+            if (generateButton != null && generateButton.getScene() != null) {
+                 dialogStage.initOwner(generateButton.getScene().getWindow());
+            } else {
+                 logger.warn("Impossible de définir le propriétaire pour la fenêtre de changement de mot de passe, la scène principale n'est pas encore chargée.");
+            }
+
+            Scene scene = new Scene(root);
+            dialogStage.setScene(scene);
+            dialogStage.showAndWait();
+
+        } catch (IOException e) {
+            logger.error("Erreur lors de l'ouverture de la fenêtre de modification du mot de passe.", e);
+            showAlert(Alert.AlertType.ERROR, "Erreur", "Impossible d'ouvrir la fenêtre de modification du mot de passe.");
         }
     }
 
     private void showAlert(AlertType alertType, String title, String message) {
-         Platform.runLater(() -> {
-             Alert alert = new Alert(alertType);
-             alert.setTitle(title);
-             alert.setHeaderText(null);
-             alert.setContentText(message);
-             alert.showAndWait();
-         });
+         if (Platform.isFxApplicationThread()) {
+            displayAlert(alertType, title, message);
+         } else {
+            Platform.runLater(() -> displayAlert(alertType, title, message));
+         }
+    }
+
+    private void displayAlert(AlertType alertType, String title, String message) {
+        Alert alert = new Alert(alertType);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
     }
 }
