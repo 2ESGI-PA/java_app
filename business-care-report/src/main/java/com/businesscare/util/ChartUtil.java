@@ -131,7 +131,7 @@ public class ChartUtil {
         } else {
             categoryStyler.setAvailableSpaceFill(0.60);
             categoryStyler.setLegendPosition(Styler.LegendPosition.InsideNW);
-            categoryStyler.setXAxisLabelRotation(45);
+            categoryStyler.setXAxisLabelRotation(90);
         }
 
         categoryStyler.setSeriesColors(CUSTOM_CHART_COLORS);

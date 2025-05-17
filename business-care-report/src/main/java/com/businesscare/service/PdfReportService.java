@@ -472,6 +472,9 @@ public class PdfReportService {
         Map<String, List<Number>> coutMap = Collections.singletonMap("Prestations", coutValues);
         drawChartOrTextBlock("Distribution par Coût", ChartUtil.createBarChartImage("Distribution par Coût", "Tranche de Prix", "Nombre de Prestations", coutMap, coutCategories, chartWidth, barChartHeight, false), null, sectionTitle, false, 0);
 
+        String suiteSectionTitle = "Statistiques des Prestations - Suite";
+        prepareNewPage(suiteSectionTitle);
+        
         Map<String, Long> topProvidersByService = statisticsService.getTopProvidersByServiceCount(5);
         if (!topProvidersByService.isEmpty()) {
             List<String> providerNames = new ArrayList<>(topProvidersByService.keySet());
@@ -483,17 +486,19 @@ public class PdfReportService {
                     "Top Prestataires par Nb. de Prestations",
                     "Prestataire", "Nombre de Prestations",
                     providerServiceMap, providerNames,
-                    chartWidth, barChartHeight, true
+                    chartWidth, barChartHeight, false
                 ),
-                null, sectionTitle, false, 0
+                null, suiteSectionTitle, false, 0 
             );
         } else {
-            drawChartOrTextBlock("Top 5 Prestataires par Nb. de Prestations", null, List.of("(Aucune donnée disponible)"), sectionTitle, false, 0);
+            drawChartOrTextBlock("Top 5 Prestataires par Nb. de Prestations", null, List.of("(Aucune donnée disponible)"), suiteSectionTitle, false, 0);
         }
 
         Map<String, Long> serviceAvailability = statisticsService.getServiceAvailabilityDistribution();
         Map<String, Number> serviceAvailabilityPie = serviceAvailability.entrySet().stream()
                                                         .collect(Collectors.toMap(Map.Entry::getKey, e-> (Number)e.getValue()));
+        logger.info("Data for Disponibilité des Prestations pie chart: " + serviceAvailabilityPie);
+                                                        
         if (!serviceAvailabilityPie.isEmpty()) {
             drawChartOrTextBlock(
                 "Disponibilité des Prestations",
@@ -502,10 +507,10 @@ public class PdfReportService {
                     serviceAvailabilityPie,
                     chartWidth, chartHeight
                 ),
-                null, sectionTitle, false, 0
+                null, suiteSectionTitle, false, 0 
             );
         } else {
-             drawChartOrTextBlock("Disponibilité des Prestations", null, List.of("(Aucune donnée disponible)"), sectionTitle, false, 0);
+             drawChartOrTextBlock("Disponibilité des Prestations", null, List.of("(Aucune donnée disponible)"), suiteSectionTitle, false, 0);
         }
 
         if (elementsOnCurrentRow % 2 != 0) {
