@@ -495,4 +495,39 @@ public class DatabaseService {
         }
         return prices;
     }
+
+    public Map<String, Long> getServiceCountByProvider(int limit) throws SQLException {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        String sql = "SELECT p.full_name AS provider_name, COUNT(s.id) AS service_count " +
+                     "FROM service s JOIN provider p ON s.providerId = p.id " +
+                     "GROUP BY p.id, p.full_name " +
+                     "ORDER BY service_count DESC " +
+                     (limit > 0 ? "LIMIT " + limit : "");
+        try (PreparedStatement pstmt = connection.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+            while (rs.next()) {
+                counts.put(rs.getString("provider_name"), rs.getLong("service_count"));
+            }
+        } catch (SQLException e) {
+            logger.error("Erreur lors de la récupération du nombre de prestations par prestataire: {}", e.getMessage(), e);
+            throw e;
+        }
+        return counts;
+    }
+
+    public Map<String, Long> getServiceCountByAvailability() throws SQLException {
+        Map<String, Long> counts = new HashMap<>();
+        String sql = "SELECT is_available, COUNT(*) AS count FROM service GROUP BY is_available";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+            while (rs.next()) {
+                String availability = rs.getBoolean("is_available") ? "Disponibles" : "Non Disponibles";
+                counts.put(availability, rs.getLong("count"));
+            }
+        } catch (SQLException e) {
+            logger.error("Erreur lors de la récupération du nombre de prestations par disponibilité: {}", e.getMessage(), e);
+            throw e;
+        }
+        return counts;
+    }
 }

@@ -15,9 +15,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.businesscare.config.DatabaseConfig;
+import com.businesscare.model.Abonnement;
 import com.businesscare.model.ClientAccount;
+import com.businesscare.model.Devis;
 import com.businesscare.model.Evenement;
+import com.businesscare.model.Facture;
 import com.businesscare.model.Prestation;
+import com.businesscare.model.Reservation;
 import com.businesscare.service.DatabaseService;
 import com.businesscare.service.PdfReportService;
 import com.businesscare.service.StatisticsService;
@@ -34,6 +38,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
 import javafx.scene.control.Hyperlink;
+import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
@@ -83,8 +88,39 @@ public class ReportController {
     @FXML private TableColumn<Prestation, Double> serviceCostCol;
     @FXML private TableColumn<Prestation, String> serviceAvailabilityCol;
 
+    @FXML private TableView<Facture> clientInvoicesTable;
+    @FXML private TableColumn<Facture, String> invoiceNumberCol;
+    @FXML private TableColumn<Facture, String> invoiceDateCol;
+    @FXML private TableColumn<Facture, Double> invoiceAmountCol;
+    @FXML private TableColumn<Facture, String> invoiceStatusCol;
+
+    @FXML private TableView<Abonnement> clientSubscriptionsTable;
+    @FXML private TableColumn<Abonnement, String> subTypeCol;
+    @FXML private TableColumn<Abonnement, String> subStartDateCol;
+    @FXML private TableColumn<Abonnement, String> subEndDateCol;
+    @FXML private TableColumn<Abonnement, Double> subAmountCol;
+
+    @FXML private TableView<Devis> clientQuotesTable;
+    @FXML private TableColumn<Devis, String> quoteNumberCol;
+    @FXML private TableColumn<Devis, String> quoteDateCol;
+    @FXML private TableColumn<Devis, Double> quoteAmountCol;
+    @FXML private TableColumn<Devis, String> quoteStatusCol;
+
+    @FXML private TextArea eventDescriptionArea;
+    @FXML private Label eventDatesLabel;
+    @FXML private Label eventCapacityLabel;
+    @FXML private Label eventDetailTypeLabel;
+
+    @FXML private TableView<Reservation> eventReservationsTable;
+    @FXML private TableColumn<Reservation, String> resClientIdCol;
+    @FXML private TableColumn<Reservation, String> resDateCol;
+    @FXML private TableColumn<Reservation, Integer> resParticipantsCol;
+
+    @FXML private TextArea serviceDescriptionArea;
+
+
     private final StatisticsService statisticsService;
-    private PdfReportService pdfReportService; 
+    private PdfReportService pdfReportService;
 
     private File generatedPdfFile = null;
     private static final String REPORT_FILENAME_PREFIX = "Rapport_Activite_Business_Care_";
@@ -144,6 +180,72 @@ public class ReportController {
             String displayText = disponible ? "✓ Oui" : "✗ Non";
             return new SimpleStringProperty(displayText);
         });
+
+        invoiceNumberCol.setCellValueFactory(new PropertyValueFactory<>("numeroFacture"));
+        invoiceDateCol.setCellValueFactory(cellData -> {
+            Date date = cellData.getValue().getDateFacturation();
+            return new SimpleStringProperty(date == null ? "" : dateFormat.format(date));
+        });
+        invoiceAmountCol.setCellValueFactory(new PropertyValueFactory<>("montantTotal"));
+        invoiceStatusCol.setCellValueFactory(cellData ->
+            new SimpleStringProperty(cellData.getValue().getStatutPaiement().toString())
+        );
+
+        subTypeCol.setCellValueFactory(cellData -> new SimpleStringProperty(cellData.getValue().getTypeAbonnement().toString()));
+        subStartDateCol.setCellValueFactory(cellData -> new SimpleStringProperty(cellData.getValue().getDateDebut() == null ? "" : dateFormat.format(cellData.getValue().getDateDebut())));
+        subEndDateCol.setCellValueFactory(cellData -> new SimpleStringProperty(cellData.getValue().getDateFin() == null ? "" : dateFormat.format(cellData.getValue().getDateFin())));
+        subAmountCol.setCellValueFactory(new PropertyValueFactory<>("montant"));
+
+        quoteNumberCol.setCellValueFactory(new PropertyValueFactory<>("numeroDevis"));
+        quoteDateCol.setCellValueFactory(cellData -> new SimpleStringProperty(cellData.getValue().getDateEmission() == null ? "" : dateFormat.format(cellData.getValue().getDateEmission())));
+        quoteAmountCol.setCellValueFactory(new PropertyValueFactory<>("montantTotal"));
+        quoteStatusCol.setCellValueFactory(cellData -> new SimpleStringProperty(cellData.getValue().getStatut().toString()));
+
+
+        clientsTable.getSelectionModel().selectedItemProperty().addListener((obs, oldSelection, newSelection) -> {
+            if (newSelection != null) {
+                clientInvoicesTable.setItems(FXCollections.observableArrayList(newSelection.getFactures()));
+                clientSubscriptionsTable.setItems(FXCollections.observableArrayList(newSelection.getAbonnements()));
+                clientQuotesTable.setItems(FXCollections.observableArrayList(newSelection.getDevis()));
+            } else {
+                clientInvoicesTable.getItems().clear();
+                clientSubscriptionsTable.getItems().clear();
+                clientQuotesTable.getItems().clear();
+            }
+        });
+
+        resClientIdCol.setCellValueFactory(new PropertyValueFactory<>("idClient"));
+        resDateCol.setCellValueFactory(cellData -> {
+            Date date = cellData.getValue().getDateReservation();
+            return new SimpleStringProperty(date == null ? "" : dateFormat.format(date));
+        });
+        resParticipantsCol.setCellValueFactory(new PropertyValueFactory<>("nombreParticipants"));
+
+        eventsTable.getSelectionModel().selectedItemProperty().addListener((obs, oldSelection, newSelection) -> {
+            if (newSelection != null) {
+                eventDescriptionArea.setText(newSelection.getDescription());
+                String dates = "Du: " + (newSelection.getDateDebut() == null ? "N/A" : dateFormat.format(newSelection.getDateDebut())) +
+                               " au: " + (newSelection.getDateFin() == null ? "N/A" : dateFormat.format(newSelection.getDateFin()));
+                eventDatesLabel.setText(dates);
+                eventCapacityLabel.setText("Capacité: " + newSelection.getCapaciteMax());
+                eventDetailTypeLabel.setText("Type: " + newSelection.getTypeEvenement());
+                eventReservationsTable.setItems(FXCollections.observableArrayList(newSelection.getReservations()));
+            } else {
+                eventDescriptionArea.clear();
+                eventDatesLabel.setText("Dates: ");
+                eventCapacityLabel.setText("Capacité: ");
+                eventDetailTypeLabel.setText("Type: ");
+                eventReservationsTable.getItems().clear();
+            }
+        });
+
+        servicesTable.getSelectionModel().selectedItemProperty().addListener((obs, oldSelection, newSelection) -> {
+            if (newSelection != null) {
+                serviceDescriptionArea.setText(newSelection.getDescription());
+            } else {
+                serviceDescriptionArea.clear();
+            }
+        });
     }
 
     @FXML
@@ -158,16 +260,26 @@ public class ReportController {
         clientsTable.getItems().clear();
         eventsTable.getItems().clear();
         servicesTable.getItems().clear();
+        clientInvoicesTable.getItems().clear();
+        clientSubscriptionsTable.getItems().clear();
+        clientQuotesTable.getItems().clear();
+        eventReservationsTable.getItems().clear();
+        eventDescriptionArea.clear();
+        eventDatesLabel.setText("Dates: ");
+        eventCapacityLabel.setText("Capacité: ");
+        eventDetailTypeLabel.setText("Type: ");
+        serviceDescriptionArea.clear();
+
 
         Task<ReportData> reportTask = new Task<>() {
             @Override
             protected ReportData call() throws Exception {
                 Connection conn = null;
-                DatabaseService databaseService; 
+                DatabaseService databaseService;
                 try {
                     updateMessage("Connexion à la base de données...");
                     conn = DatabaseConfig.getConnection();
-                    databaseService = new DatabaseService(conn); 
+                    databaseService = new DatabaseService(conn);
 
                     statisticsService.setDatabaseService(databaseService);
                     pdfReportService = new PdfReportService(statisticsService, databaseService);
@@ -196,7 +308,7 @@ public class ReportController {
 
                     updateMessage("Génération du rapport PDF...");
                     String reportFileNameWithTimestamp = REPORT_FILENAME_PREFIX + timestampFormat.format(new Date()) + ".pdf";
-                    
+
                     if (pdfReportService == null) {
                         logger.error("PdfReportService n'a pas été initialisé !");
                         throw new IllegalStateException("PdfReportService n'a pas été initialisé.");
@@ -296,7 +408,7 @@ public class ReportController {
             Stage dialogStage = new Stage();
             dialogStage.setTitle("Modifier le mot de passe");
             dialogStage.initModality(Modality.WINDOW_MODAL);
-            
+
             if (generateButton != null && generateButton.getScene() != null) {
                  dialogStage.initOwner(generateButton.getScene().getWindow());
             } else {

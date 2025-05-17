@@ -1,6 +1,6 @@
 package com.businesscare.service;
 
-import java.sql.SQLException; 
+import java.sql.SQLException;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -63,20 +63,20 @@ public class StatisticsService {
             String trancheLabel;
             if (i == 0) {
                 trancheLabel = "< " + upperBound + "€";
-            } else if (i == tranches.length -1 && tranches.length > 1 && upperBound < lowerBound) { 
+            } else if (i == tranches.length -1 && tranches.length > 1 && upperBound < lowerBound) {
                  trancheLabel = "> " + lowerBound + "€";
             } else {
                  trancheLabel = lowerBound + "€ - " + upperBound + "€";
             }
             distribution.put(trancheLabel, 0.0);
         }
-        
+
         if (tranches.length > 0) {
              boolean lastTrancheIsGreaterThan = true;
              if (tranches.length > 1) {
-                 for(int k=1; k < tranches.length; k++) { if(tranches[k] < tranches[k-1]) {lastTrancheIsGreaterThan = false; break;} } 
+                 for(int k=1; k < tranches.length; k++) { if(tranches[k] < tranches[k-1]) {lastTrancheIsGreaterThan = false; break;} }
              }
-             
+
              if(lastTrancheIsGreaterThan && !distribution.containsKey("> " + tranches[tranches.length-1] + "€")){
                  distribution.put("> " + tranches[tranches.length - 1] + "€", 0.0);
              }
@@ -114,16 +114,15 @@ public class StatisticsService {
             }
             if (!assigned && revenue >= tranches[tranches.length - 1]) {
                 String trancheLabel = "> " + tranches[tranches.length - 1] + "€";
-                
+
                 if (distribution.containsKey(trancheLabel)) {
                     distribution.merge(trancheLabel, revenue, Double::sum);
-                } else if (tranches.length == 1 && revenue >= 0 && !distribution.containsKey("< " + tranches[0] + "€" ) ) { 
-                     
+                } else if (tranches.length == 1 && revenue >= 0 && !distribution.containsKey("< " + tranches[0] + "€" ) ) {
                 }
             }
         }
         return distribution.entrySet().stream()
-            .filter(entry -> entry.getValue() >= 0) 
+            .filter(entry -> entry.getValue() >= 0)
             .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, LinkedHashMap::new));
     }
 
@@ -157,7 +156,7 @@ public class StatisticsService {
             return Collections.emptyMap();
         }
     }
-    
+
     public Map<String, Long> getEventCountByType(List<Evenement> evenements) {
         if (evenements == null) return Collections.emptyMap();
         return evenements.stream()
@@ -174,7 +173,7 @@ public class StatisticsService {
             return Collections.emptyMap();
         }
     }
-    
+
     public Map<String, Long> getEventDistributionByCapacity(double[] tranches) {
         if (databaseService == null) return Collections.emptyMap();
         Map<String, Long> distribution = new LinkedHashMap<>();
@@ -197,7 +196,7 @@ public class StatisticsService {
             }
             distribution.put(trancheLabel, 0L);
         }
-        if (tranches.length > 0) { 
+        if (tranches.length > 0) {
             distribution.put("> " + (int)tranches[tranches.length - 1], 0L);
         }
 
@@ -216,7 +215,7 @@ public class StatisticsService {
                 String trancheLabel;
                  if (i == 0) {
                     trancheLabel = "0 - " + (int)upperBound;
-                     if (capacity >= lowerBound && capacity <= upperBound) { 
+                     if (capacity >= lowerBound && capacity <= upperBound) {
                         distribution.merge(trancheLabel, 1L, Long::sum);
                         assigned = true;
                         break;
@@ -336,12 +335,37 @@ public class StatisticsService {
             .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, LinkedHashMap::new));
     }
 
-
     public List<Prestation> getTop5PrestationsFrequentes(List<Prestation> prestations) {
          if (prestations == null) return Collections.emptyList();
          return prestations.stream()
                           .sorted(Comparator.comparingInt((Prestation p) -> p.getIdEvenementsAssocies().size()).reversed())
                           .limit(5)
                           .collect(Collectors.toList());
+    }
+
+    public Map<String, Long> getTopProvidersByServiceCount(int limit) {
+        if (databaseService == null) {
+            logger.error("DatabaseService non initialisé pour getTopProvidersByServiceCount.");
+            return Collections.emptyMap();
+        }
+        try {
+            return databaseService.getServiceCountByProvider(limit);
+        } catch (SQLException e) {
+            logger.error("Erreur SQL lors de la récupération du top des prestataires par nombre de services.", e);
+            return Collections.emptyMap();
+        }
+    }
+
+    public Map<String, Long> getServiceAvailabilityDistribution() {
+        if (databaseService == null) {
+            logger.error("DatabaseService non initialisé pour getServiceAvailabilityDistribution.");
+            return Collections.emptyMap();
+        }
+        try {
+            return databaseService.getServiceCountByAvailability();
+        } catch (SQLException e) {
+            logger.error("Erreur SQL lors de la récupération de la distribution des prestations par disponibilité.", e);
+            return Collections.emptyMap();
+        }
     }
 }

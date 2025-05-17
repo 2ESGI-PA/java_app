@@ -70,8 +70,8 @@ public class PdfReportService {
 
     public PdfReportService(StatisticsService statisticsService, DatabaseService databaseService) {
         this.statisticsService = statisticsService;
-        this.databaseService = databaseService; 
-        statisticsService_setDb(this.databaseService); 
+        this.databaseService = databaseService;
+        statisticsService_setDb(this.databaseService);
     }
 
     private String formatCurrency(double value) {
@@ -102,10 +102,10 @@ public class PdfReportService {
         this.document.close();
         logger.info("Rapport PDF généré avec succès : {}", filePath);
     }
-    
+
     private void statisticsService_setDb(DatabaseService dbService){
         if(this.statisticsService != null && dbService != null){
-            this.statisticsService.setDatabaseService(dbService); 
+            this.statisticsService.setDatabaseService(dbService);
         } else {
             if (this.statisticsService == null) {
                 logger.error("StatisticsService est null dans PdfReportService.statisticsService_setDb");
@@ -244,8 +244,8 @@ public class PdfReportService {
     private void drawChartOrTextBlock(String title, byte[] chartBytes, List<String> textLines, String sectionTitle, boolean useFullWidth, float chartHeightOverride) throws IOException {
         float elementWidth = useFullWidth ? USABLE_PAGE_WIDTH : ELEMENT_WIDTH_HALF;
         int defaultChartHeight = useFullWidth ? DEFAULT_CHART_HEIGHT_HALF_PAGE * 2 : DEFAULT_CHART_HEIGHT_HALF_PAGE;
-        
-        if (title.toLowerCase().contains("par ca") || title.toLowerCase().contains("secteur d'activité") || title.toLowerCase().contains("par capacité") || title.toLowerCase().contains("par coût")) {
+
+        if (title.toLowerCase().contains("par ca") || title.toLowerCase().contains("secteur d'activité") || title.toLowerCase().contains("par capacité") || title.toLowerCase().contains("par coût") || title.toLowerCase().contains("top 5 prestataires")) {
              defaultChartHeight = useFullWidth ? BAR_CHART_HEIGHT_HALF_PAGE * 2 : BAR_CHART_HEIGHT_HALF_PAGE;
         }
         if (title.toLowerCase().contains("par mois")) {
@@ -377,7 +377,7 @@ public class PdfReportService {
         List<Number> abonnementValues = new ArrayList<>(repartitionAbonnement.values());
         Map<String, List<Number>> abonnementMap = Collections.singletonMap("Clients", abonnementValues);
         drawChartOrTextBlock("Répartition par Formule d'Abonnement", ChartUtil.createBarChartImage("Répartition par Formule d'Abonnement", "Formule", "Nombre de Clients", abonnementMap, abonnementCategories, chartWidth, barChartHeight, true), null, sectionTitle, false, 0);
-        
+
         double[] caTranches = {5000, 15000, 50000};
         Map<String, Double> repartitionCA = statisticsService.getClientRevenueDistribution(caTranches);
         Map<String, Number> repartitionCAPie = repartitionCA.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e-> (Number)e.getValue()));
@@ -392,7 +392,7 @@ public class PdfReportService {
         List<Number> secteurValues = new ArrayList<>(repartitionSecteur.values());
         Map<String, List<Number>> secteurMap = Collections.singletonMap("Clients", secteurValues);
         drawChartOrTextBlock("Répartition par Secteur d'Activité (Top 5)", ChartUtil.createBarChartImage("Répartition par Secteur d'Activité (Top 5)", "Secteur", "Nombre de Clients", secteurMap, secteurCategories, chartWidth, barChartHeight, false), null, sectionTitle, false, 0);
-        
+
         Map<String, Double> top5Clients = statisticsService.getTop5ClientsByTotalPaid();
         List<String> topClientsText = new ArrayList<>();
         topClientsText.add("Basé sur le Montant Total Facturé et Payé:");
@@ -401,7 +401,7 @@ public class PdfReportService {
         } else {
             top5Clients.forEach((name, amount) -> topClientsText.add(String.format("• %s - %s", name, formatCurrency(amount))));
         }
-        if (elementsOnCurrentRow % 2 != 0) { 
+        if (elementsOnCurrentRow % 2 != 0) {
             currentY -= Math.max(lastElementHeightOnRow, 0) + ELEMENT_VERTICAL_SPACING;
             elementsOnCurrentRow = 0; lastElementHeightOnRow = 0;
         }
@@ -414,6 +414,7 @@ public class PdfReportService {
         int chartWidth = (int) ELEMENT_WIDTH_HALF;
         int chartHeight = DEFAULT_CHART_HEIGHT_HALF_PAGE;
         int barChartHeight = BAR_CHART_HEIGHT_HALF_PAGE;
+        int lineChartHeight = LINE_CHART_HEIGHT_FULL_PAGE;
 
         Map<String, Long> repartitionType = statisticsService.getEventCountByType(evenements);
         Map<String, Number> repartitionTypePie = repartitionType.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e-> (Number)e.getValue()));
@@ -425,7 +426,7 @@ public class PdfReportService {
             currentY -= Math.max(lastElementHeightOnRow, 0) + ELEMENT_VERTICAL_SPACING;
             elementsOnCurrentRow = 0; lastElementHeightOnRow = 0;
         }
-        drawChartOrTextBlock("Fréquence par Mois", ChartUtil.createLineChartImage("Fréquence par Mois", "Mois", "Nombre d'Événements", freqMoisLine, (int)USABLE_PAGE_WIDTH, LINE_CHART_HEIGHT_FULL_PAGE), null, sectionTitle, true, LINE_CHART_HEIGHT_FULL_PAGE);
+        drawChartOrTextBlock("Fréquence par Mois", ChartUtil.createLineChartImage("Fréquence par Mois", "Mois", "Nombre d'Événements", freqMoisLine, (int)USABLE_PAGE_WIDTH, lineChartHeight), null, sectionTitle, true, lineChartHeight);
 
         double[] capaciteTranches = {50, 100, 200};
         Map<String, Long> repartitionCapacite = statisticsService.getEventDistributionByCapacity(capaciteTranches);
@@ -437,7 +438,7 @@ public class PdfReportService {
         Map<String, Long> statutEvenements = statisticsService.getEventStatusCounts();
         Map<String, Number> statutEvenementsPie = statutEvenements.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e-> (Number)e.getValue()));
         drawChartOrTextBlock("Statut des Événements (Actifs/Inactifs)", ChartUtil.createPieChartImage("Statut des Événements", statutEvenementsPie, chartWidth, chartHeight), null, sectionTitle, false, 0);
-        
+
         Map<String, Integer> top5Events = statisticsService.getTop5EventsByBooking();
         List<String> topEventsText = new ArrayList<>();
         topEventsText.add("Basé sur le Nombre de Réservations:");
@@ -471,18 +472,46 @@ public class PdfReportService {
         Map<String, List<Number>> coutMap = Collections.singletonMap("Prestations", coutValues);
         drawChartOrTextBlock("Distribution par Coût", ChartUtil.createBarChartImage("Distribution par Coût", "Tranche de Prix", "Nombre de Prestations", coutMap, coutCategories, chartWidth, barChartHeight, false), null, sectionTitle, false, 0);
 
-        List<Prestation> top5Prestations = statisticsService.getTop5PrestationsFrequentes(prestations);
-        List<String> topPrestationsText = new ArrayList<>();
-        topPrestationsText.add("Basé sur les associations aux événements (si implémenté):");
-        if (top5Prestations.isEmpty()) {
-            topPrestationsText.add("(Aucune donnée ou liaison événement non implémentée)");
+        Map<String, Long> topProvidersByService = statisticsService.getTopProvidersByServiceCount(5);
+        if (!topProvidersByService.isEmpty()) {
+            List<String> providerNames = new ArrayList<>(topProvidersByService.keySet());
+            List<Number> serviceCounts = new ArrayList<>(topProvidersByService.values());
+            Map<String, List<Number>> providerServiceMap = Collections.singletonMap("Nb. Prestations", serviceCounts);
+            drawChartOrTextBlock(
+                "Top 5 Prestataires par Nb. de Prestations",
+                ChartUtil.createBarChartImage(
+                    "Top Prestataires par Nb. de Prestations",
+                    "Prestataire", "Nombre de Prestations",
+                    providerServiceMap, providerNames,
+                    chartWidth, barChartHeight, true
+                ),
+                null, sectionTitle, false, 0
+            );
         } else {
-            top5Prestations.forEach(p -> topPrestationsText.add(String.format("• %s (Évé. Associés: %d)", p.getNomPrestation(), p.getIdEvenementsAssocies().size())));
+            drawChartOrTextBlock("Top 5 Prestataires par Nb. de Prestations", null, List.of("(Aucune donnée disponible)"), sectionTitle, false, 0);
         }
-         if (elementsOnCurrentRow % 2 != 0) {
-            currentY -= Math.max(lastElementHeightOnRow, 0) + ELEMENT_VERTICAL_SPACING;
-            elementsOnCurrentRow = 0; lastElementHeightOnRow = 0;
+
+        Map<String, Long> serviceAvailability = statisticsService.getServiceAvailabilityDistribution();
+        Map<String, Number> serviceAvailabilityPie = serviceAvailability.entrySet().stream()
+                                                        .collect(Collectors.toMap(Map.Entry::getKey, e-> (Number)e.getValue()));
+        if (!serviceAvailabilityPie.isEmpty()) {
+            drawChartOrTextBlock(
+                "Disponibilité des Prestations",
+                ChartUtil.createPieChartImage(
+                    "Disponibilité des Prestations",
+                    serviceAvailabilityPie,
+                    chartWidth, chartHeight
+                ),
+                null, sectionTitle, false, 0
+            );
+        } else {
+             drawChartOrTextBlock("Disponibilité des Prestations", null, List.of("(Aucune donnée disponible)"), sectionTitle, false, 0);
         }
-        drawChartOrTextBlock("Top 5 Prestations (Critère Actuel)", null, topPrestationsText, sectionTitle, true, 0);
+
+        if (elementsOnCurrentRow % 2 != 0) {
+             currentY -= Math.max(lastElementHeightOnRow, 0) + ELEMENT_VERTICAL_SPACING;
+             elementsOnCurrentRow = 0;
+             lastElementHeightOnRow = 0;
+        }
     }
 }
